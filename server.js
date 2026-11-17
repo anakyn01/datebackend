@@ -285,8 +285,8 @@ res.json({success:true, message: `${provider} 로그인 성공`, user});
   }
 })
 
-const PORT = 3000;
-app.listen(PORT, async () => {
+const PORT = process.env.PORT || 3000;
+app.listen(PORT,'0.0.0.0', async () => {
   try {
     await sequelize.authenticate();
     //await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
