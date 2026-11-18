@@ -20,16 +20,16 @@ const path = require('path');
 const fs = require('fs');
 
 // 업로드 폴더가 없으면 자동 생성
-if(!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
 app.use('/uploads', express.static('uploads'));
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'), 
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))  
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
 
-// 회원가입
+// 1. 회원가입
 app.post('/api/signup', upload.array('photos', 3), async (req, res) => {
   const { email, password, nickname, age, gender, bio } = req.body;
   
@@ -42,9 +42,10 @@ app.post('/api/signup', upload.array('photos', 3), async (req, res) => {
 
   const t = await sequelize.transaction();
   try {
-    let profile_image_main = req.files[0] ? `/uploads/${req.files[0].filename}` : null;
-    let profile_image_sub1 = req.files[1] ? `/uploads/${req.files[1].filename}` : null;
-    let profile_image_sub2 = req.files[2] ? `/uploads/${req.files[2].filename}` : null;
+    const files = req.files || [];
+    let profile_image_main = files[0] ? `/uploads/${files[0].filename}` : null;
+    let profile_image_sub1 = files[1] ? `/uploads/${files[1].filename}` : null;
+    let profile_image_sub2 = files[2] ? `/uploads/${files[2].filename}` : null;
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -54,7 +55,7 @@ app.post('/api/signup', upload.array('photos', 3), async (req, res) => {
       nickname, 
       age, 
       gender, 
-      bio,
+      bio: bio || '',
       profile_image_main,
       profile_image_sub1,
       profile_image_sub2,
@@ -70,7 +71,7 @@ app.post('/api/signup', upload.array('photos', 3), async (req, res) => {
     });
   } catch (error) {
     await t.rollback();
-    console.error(error);
+    console.error('❌ 회원가입 서버 에러 상세:', error);
     
     if (error.name === 'SequelizeUniqueConstraintError') {
       return res.status(409).json({
@@ -81,12 +82,12 @@ app.post('/api/signup', upload.array('photos', 3), async (req, res) => {
 
     res.status(500).json({
       success: false, 
-      message: '회원가입 처리 중 서버 에러가 발생했습니다.'
+      message: '회원가입 처리 중 서버 에러가 발생했습니다: ' + error.message
     });
   }
 });
 
-// 2차 회원가입 (추가 정보 입력)
+// 2. 2차 회원가입 (추가 정보 입력)
 app.patch('/api/users/:id/secondary-signup', async (req, res) => {
   const userId = req.params.id;
   const { phone_number, occupation, address } = req.body; 
@@ -98,12 +99,12 @@ app.patch('/api/users/:id/secondary-signup', async (req, res) => {
     await user.update({ phone_number, occupation, address });
     res.json({ success: true, message: '추가 정보 입력이 완료되었습니다.' });
   } catch (error) {
-    console.error("2차 회원가입 에러:", error);
+    console.error("❌ 2차 회원가입 에러:", error);
     res.status(500).json({ success: false, message: '정보 저장 중 에러가 발생했습니다.' });    
   }   
 });
 
-// 로그인
+// 3. 로그인
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -135,17 +136,20 @@ app.post('/api/login', async (req, res) => {
 
     res.json({ success: true, message: '로그인 성공', user });
   } catch (error) {
-    console.error("로그인 에러:", error);
+    console.error("❌ 로그인 에러:", error);
     res.status(500).json({ success: false, message: '서버 에러가 발생했습니다.' });   
   }
 });
 
-// 매칭 수락 및 포인트 차감
+// 4. 매칭 수락 및 포인트 차감
 app.post('/api/match/accept', async (req, res) => {
   const { match_id, user_id } = req.body;
   const t = await sequelize.transaction();
   try {
-    const user = await User.findByPk(user_id);
+    const user = await User.findByPk(user_id, { transaction: t });
+    if (!user) {
+      throw new Error('유저를 찾을 수 없습니다.');
+    }
     if (user.points < 10000) {
       throw new Error('포인트가 부족합니다. 충전해 주세요!');
     }
@@ -160,45 +164,61 @@ app.post('/api/match/accept', async (req, res) => {
   }
 });
 
-// 노쇼 신고 접수
+// 5. 노쇼 신고 접수
 app.post('/api/match/noshow', async (req, res) => {
-  const { match_id, target_user_id } = req.body;
-  await Match.update({ status: 'NO_SHOW' }, { where: { id: match_id } });
-  
-  const targetUser = await User.findByPk(target_user_id);
-  const newCount = targetUser.no_show_count + 1;
-  
-  if (newCount >= 3) {
-    await targetUser.update({ no_show_count: newCount, status: 'BANNED' });
-  } else {
-    await targetUser.update({ no_show_count: newCount });    
+  try {
+    const { match_id, target_user_id } = req.body;
+    await Match.update({ status: 'NO_SHOW' }, { where: { id: match_id } });
+    
+    const targetUser = await User.findByPk(target_user_id);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: '대상을 찾을 수 없습니다.' });
+    }
+
+    const newCount = targetUser.no_show_count + 1;
+    if (newCount >= 3) {
+      await targetUser.update({ no_show_count: newCount, status: 'BANNED' });
+    } else {
+      await targetUser.update({ no_show_count: newCount });    
+    }
+    res.json({ success: true, message: '신고 접수 완료! 강력하게 제재하겠습니다.' });
+  } catch (error) {
+    console.error("❌ 노쇼 신고 에러:", error);
+    res.status(500).json({ success: false, message: '노쇼 처리 중 에러가 발생했습니다.' });
   }
-  res.json({ success: true, message: '신고 접수 완료! 강력하게 제재하겠습니다.' });
 });
 
-// 마이페이지
+// 6. 마이페이지
 app.get('/api/mypage/:user_id', async (req, res) => {
-  const userId = req.params.user_id;
-  const user = await User.findByPk(userId);
+  try {
+    const userId = req.params.user_id;
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: '유저를 찾을 수 없습니다.' });
+    }
 
-  const receivedLikes = await Match.count({ where: { receiver_id: userId, status: 'REQUESTED' } });
-  const matchedCount = await Match.count({
-    where: {
-      [Op.or]: [{ sender_id: userId }, { receiver_id: userId }],
-      status: 'ACCEPTED'    
-    }    
-  });
-  const diaryCount = await Diary.count({ where: { user_id: userId } });
+    const receivedLikes = await Match.count({ where: { receiver_id: userId, status: 'REQUESTED' } });
+    const matchedCount = await Match.count({
+      where: {
+        [Op.or]: [{ sender_id: userId }, { receiver_id: userId }],
+        status: 'ACCEPTED'    
+      }    
+    });
+    const diaryCount = await Diary.count({ where: { user_id: userId } });
 
-  res.json({
-    ...user.toJSON(),
-    received_likes: receivedLikes,
-    matches: matchedCount,
-    diaries: diaryCount
-  });
+    res.json({
+      ...user.toJSON(),
+      received_likes: receivedLikes,
+      matches: matchedCount,
+      diaries: diaryCount
+    });
+  } catch (error) {
+    console.error("❌ 마이페이지 조회 에러:", error);
+    res.status(500).json({ success: false, message: '마이페이지 로딩 실패' });
+  }
 });
 
-// 관리자 로그인
+// 7. 관리자 로그인
 app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -214,22 +234,23 @@ app.post('/api/admin/login', async (req, res) => {
 
     res.json({ success: true, name: admin.name, message: '관리자 대시보드에 로그인하셨습니다.' });
   } catch(error) {
-    console.error("어드민 로그인 에러", error);
+    console.error("❌ 어드민 로그인 에러:", error);
     res.status(500).json({ success: false, message: '서버 통신 에러' });
   }
 });
 
-// 유저 목록 조회
+// 8. 유저 목록 조회
 app.get('/api/admin/users', async (req, res) => {
   try {
     const users = await User.findAll({ order: [['id', 'DESC']] });
     res.json({ success: true, users });
   } catch (error) {
+    console.error("❌ 유저 목록 조회 에러:", error);
     res.status(500).json({ success: false, message: '유저 목록 로딩 실패' });
   }
 });
 
-// 유저 승인 (수질 검사 통과)
+// 9. 유저 승인 (수질 검사 통과)
 app.patch('/api/admin/users/:id/approve', async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id);
@@ -238,60 +259,56 @@ app.patch('/api/admin/users/:id/approve', async (req, res) => {
     await user.update({ status: 'ACTIVE' });
     res.json({ success: true, message: '승인 완료' });
   } catch(error) {
+    console.error("❌ 유저 승인 에러:", error);
     res.status(500).json({ success: false, message: '승인 처리 실패' });
   }
 });
 
-app.post('/api/social-login', async(req, res) => {
-  const {email, provider, provider_id, nickname } = req.body;
+// 10. 소셜 로그인
+app.post('/api/social-login', async (req, res) => {
+  const { email, provider, provider_id, nickname } = req.body;
 
-  try{
-    //1. 이미 가입된 유저인지 이메일로 확인
-    let user = await User.findOne({where:{email}});
-    //2. 신규 유저라면 DB에 자동 회원가입 처리
-    if(!user) {
-      //소셜 로그인은 비밀번호가 필요 없으나, 모델 조건 충족을 
-      // 위해 provider_id를 암호화하여 저장
+  try {
+    let user = await User.findOne({ where: { email } });
+    if (!user) {
       const hashedSocialPassword = await bcrypt.hash(provider_id, 10);
 
       user = await User.create({
         email: email,
         password: hashedSocialPassword,
-        nickname: nickname,
+        nickname: nickname || '소셜유저',
         age: 20,
-        gender:'M',
-        status:'PENDING'
+        gender: 'M',
+        status: 'PENDING'
       });
     }
 
-    //3. 상태검사
-    if(user.status === 'PENDING'){
+    if (user.status === 'PENDING') {
       return res.status(403).json({
         success: false,
-        message:'수질 검사(승인)가 진행 중입니다. 조금만 기다려 주세요'
+        message: '수질 검사(승인)가 진행 중입니다. 조금만 기다려 주세요'
       });
     }
 
-    if(user.status === 'BANNED'){
+    if (user.status === 'BANNED') {
       return res.status(403).json({
-        success:false,
-        message:'이용 수칙 위반으로 영구 정지된 계정입니다.'
+        success: false,
+        message: '이용 수칙 위반으로 영구 정지된 계정입니다.'
       });
     }
-res.json({success:true, message: `${provider} 로그인 성공`, user});
+
+    res.json({ success: true, message: `${provider} 로그인 성공`, user });
   } catch (error) {
-    console.error("소셜 로그인 에러:", error);
-    res.status(500).json({success: false, message:'서버 에러가 발생했습니다'});
+    console.error("❌ 소셜 로그인 에러:", error);
+    res.status(500).json({ success: false, message: '서버 에러가 발생했습니다' });
   }
-})
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT,'0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   try {
     await sequelize.authenticate();
-    //await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     await sequelize.sync({ force: false });
-    //await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
 
     const adminCount = await Admin.count();
     if (adminCount === 0) {
@@ -307,6 +324,6 @@ app.listen(PORT,'0.0.0.0', async () => {
     console.log("데이터베이스 연결 확인 완료");
     console.log(`백엔드 서버가 http://localhost:${PORT} 에서 열심히 돌아가고 있습니다.`);
   } catch (err) {
-    console.error('서버 시작 중 데이터베이스 연결 에러 발생:', err);
+    console.error('❌ 서버 시작 중 데이터베이스 연결 에러 발생:', err);
   }
 });
