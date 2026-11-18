@@ -308,7 +308,9 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', async () => {
   try {
     await sequelize.authenticate();
-    await sequelize.sync({ force: false });
+    
+    // 💡 [핵심] 기존 테이블을 초기화하고 현재 모델 정의에 맞춰 깔끔하게 새로 생성합니다!
+    await sequelize.sync({ force: true }); 
 
     const adminCount = await Admin.count();
     if (adminCount === 0) {
