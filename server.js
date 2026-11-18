@@ -304,6 +304,43 @@ app.post('/api/social-login', async (req, res) => {
   }
 });
 
+// 🔥 카드 스와이프용 프로필 목록 조회 API
+app.get('/api/profiles', async (req, res) => {
+  try {
+    const users = await User.findAll({
+      where: { status: 'ACTIVE' }, // 활성화된 유저들만
+      order: [['id', 'DESC']]
+    });
+
+    // 프론트엔드 모델 규격에 맞게 데이터 가공
+    const profiles = users.map(user => ({
+      id: user.id,
+      nickname: user.nickname,
+      age: user.age,
+      bio: user.bio || '소개가 없습니다.',
+      photo_url: user.profile_image_main ? `https://datebackend-yf90.onrender.com${user.profile_image_main}` : null,
+    }));
+
+    res.json({ success: true, data: profiles });
+  } catch (error) {
+    console.error("❌ 프로필 조회 에러:", error);
+    res.status(500).json({ success: false, message: '프로필을 불러오지 못했습니다.' });
+  }
+});
+
+// 🔥 스와이프(좋아요/싫어요) 액션 처리 API
+app.post('/api/swipe', async (req, res) => {
+  try {
+    const { sender_id, receiver_id, action } = req.body;
+    // 간단한 스와이프 기록 로직 (필요시 Match 테이블 활용)
+    console.log(`👤 유저 ${sender_id}님이 유저 ${receiver_id}님에게 ${action} 했습니다.`);
+    res.json({ success: true, message: '처리 완료' });
+  } catch (error) {
+    console.error("❌ 스와이프 에러:", error);
+    res.status(500).json({ success: false, message: '서버 에러' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', async () => {
   try {
