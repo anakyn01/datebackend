@@ -7,7 +7,7 @@ const sequelize = new Sequelize('dating_db', 'root', '1234', {
   logging: true,    
 });*/
 
-const sequelize = new Sequelize('dating_db', 'root', '1234', {
+const sequelize = new Sequelize({
   dialect: 'sqlite', 
   storage: './dating_db.sqlite',
   logging: console.log,    
