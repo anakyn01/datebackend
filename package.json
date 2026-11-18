@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "test":"echo \"Error: no test spectfied\" && exit 1"
+    "test": "echo \"Error: no test spectfied\" && exit 1"
   },
   "keywords": [],
   "type": "commonjs",
@@ -19,7 +19,7 @@
     "multer": "^2.3.0",
     "mysql2": "^3.24.4",
     "sequelize": "^6.37.8",
-    "sqlite3": "^6.0.1"
+    "sqlite": "^5.1.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
